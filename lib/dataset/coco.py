@@ -270,9 +270,9 @@ class COCODataset(JointsDataset):
             num_boxes = num_boxes + 1
 
             center, scale = self._box2cs(box)
-            joints_3d = np.zeros((self.num_joints, 3), dtype=np.float)
+            joints_3d = np.zeros((self.num_joints, 3), dtype=np.float64)
             joints_3d_vis = np.ones(
-                (self.num_joints, 3), dtype=np.float)
+                (self.num_joints, 3), dtype=np.float64)
             kpt_db.append({
                 'image': img_name,
                 'center': center,
