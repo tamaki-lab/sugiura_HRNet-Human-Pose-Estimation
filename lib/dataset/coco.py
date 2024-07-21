@@ -67,6 +67,8 @@ class COCODataset(JointsDataset):
 
         self.coco = COCO(self._get_ann_file_keypoint())
 
+        self.data_select = cfg.DATASET.SELECT_DATA
+
         # deal with class names
         cats = [cat['name']
                 for cat in self.coco.loadCats(self.coco.getCatIds())]
@@ -181,8 +183,8 @@ class COCODataset(JointsDataset):
             if max(obj['keypoints']) == 0:
                 continue
 
-            joints_3d = np.zeros((self.num_joints, 3), dtype=np.float)
-            joints_3d_vis = np.zeros((self.num_joints, 3), dtype=np.float)
+            joints_3d = np.zeros((self.num_joints, 3), dtype=float)
+            joints_3d_vis = np.zeros((self.num_joints, 3), dtype=float)
             for ipt in range(self.num_joints):
                 joints_3d[ipt, 0] = obj['keypoints'][ipt * 3 + 0]
                 joints_3d[ipt, 1] = obj['keypoints'][ipt * 3 + 1]
@@ -270,9 +272,9 @@ class COCODataset(JointsDataset):
             num_boxes = num_boxes + 1
 
             center, scale = self._box2cs(box)
-            joints_3d = np.zeros((self.num_joints, 3), dtype=np.float64)
+            joints_3d = np.zeros((self.num_joints, 3), dtype=float)
             joints_3d_vis = np.ones(
-                (self.num_joints, 3), dtype=np.float64)
+                (self.num_joints, 3), dtype=float)
             kpt_db.append({
                 'image': img_name,
                 'center': center,
@@ -305,14 +307,25 @@ class COCODataset(JointsDataset):
         # person x (keypoints)
         _kpts = []
         for idx, kpt in enumerate(preds):
-            _kpts.append({
-                'keypoints': kpt,
-                'center': all_boxes[idx][0:2],
-                'scale': all_boxes[idx][2:4],
-                'area': all_boxes[idx][4],
-                'score': all_boxes[idx][5],
-                'image': int(img_path[idx][-16:-4])
-            })
+            if self.data_select == 'default':
+                _kpts.append({
+                    'keypoints': kpt,
+                    'center': all_boxes[idx][0:2],
+                    'scale': all_boxes[idx][2:4],
+                    'area': all_boxes[idx][4],
+                    'score': all_boxes[idx][5],
+                    'image': int(img_path[idx][-16:-4])
+                })
+            else:
+                _kpts.append({
+                    'keypoints': kpt,
+                    'center': all_boxes[idx][0:2],
+                    'scale': all_boxes[idx][2:4],
+                    'area': all_boxes[idx][4],
+                    'score': all_boxes[idx][5],
+                    'image': img_path[idx]
+                })
+
         # image x person x (keypoints)
         kpts = defaultdict(list)
         for kpt in _kpts:
@@ -357,11 +370,14 @@ class COCODataset(JointsDataset):
 
         self._write_coco_keypoint_results(
             oks_nmsed_kpts, res_file)
-        if 'test' not in self.image_set:
-            info_str = self._do_python_keypoint_eval(
-                res_file, res_folder)
-            name_value = OrderedDict(info_str)
-            return name_value, name_value['AP']
+        if self.data_select == 'default':
+            if 'test' not in self.image_set:
+                info_str = self._do_python_keypoint_eval(
+                    res_file, res_folder)
+                name_value = OrderedDict(info_str)
+                return name_value, name_value['AP']
+            else:
+                return {'Null': 0}, 0
         else:
             return {'Null': 0}, 0
 
@@ -405,7 +421,7 @@ class COCODataset(JointsDataset):
             _key_points = np.array([img_kpts[k]['keypoints']
                                     for k in range(len(img_kpts))])
             key_points = np.zeros(
-                (_key_points.shape[0], self.num_joints * 3), dtype=np.float
+                (_key_points.shape[0], self.num_joints * 3), dtype=float
             )
 
             for ipt in range(self.num_joints):

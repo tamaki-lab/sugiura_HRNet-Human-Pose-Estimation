@@ -93,3 +93,7 @@ external/
 draws/
 plot/
 
+*.png
+*.pkl
+*.txt
+*.jpg

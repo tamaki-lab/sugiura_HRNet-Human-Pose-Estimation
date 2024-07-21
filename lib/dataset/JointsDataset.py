@@ -20,7 +20,9 @@ from torch.utils.data import Dataset
 from utils.transforms import get_affine_transform
 from utils.transforms import affine_transform
 from utils.transforms import fliplr_joints
-
+import glob
+import os
+import pickle
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +56,26 @@ class JointsDataset(Dataset):
         self.joints_weight = 1
 
         self.transform = transform
+        self.data_select = cfg.DATASET.SELECT_DATA
         self.db = []
+        self.prepared_dataset = 'make_dataset/num_keypoints/pickle/17'
+        path = os.path.join(self.prepared_dataset, '*', '*')
+        self.pickle_list = glob.glob(path)
+
+    def transform_list(self, input_list):
+        transformed_list = []
+        for i in range(0, len(input_list), 3):
+            # 3番目の値を0に置き換えて新しいサブリストを作成
+            sublist = [input_list[i], input_list[i + 1], 0]
+            transformed_list.append(sublist)
+        return transformed_list
+
+    def binarize_list(self, joints):
+        binarized_list = []
+        for sublist in joints:
+            binarized_sublist = [0 if value == 0 else 1 for value in sublist]
+            binarized_list.append(binarized_sublist)
+        return binarized_list
 
     def _get_db(self):
         raise NotImplementedError
@@ -108,94 +129,148 @@ class JointsDataset(Dataset):
         return center, scale
 
     def __len__(self,):
-        return len(self.db)
+        if self.data_select == 'default':
+            return len(self.db)
+        else:
+            return len(self.pickle_list)
 
     def __getitem__(self, idx):
-        db_rec = copy.deepcopy(self.db[idx])
+        try:
+            if self.data_select == 'default':
+                db_rec = copy.deepcopy(self.db[idx])
 
-        image_file = db_rec['image']
-        filename = db_rec['filename'] if 'filename' in db_rec else ''
-        imgnum = db_rec['imgnum'] if 'imgnum' in db_rec else ''
+                image_file = db_rec['image']
+                filename = db_rec['filename'] if 'filename' in db_rec else ''
+                imgnum = db_rec['imgnum'] if 'imgnum' in db_rec else ''
 
-        if self.data_format == 'zip':
-            from utils import zipreader
-            data_numpy = zipreader.imread(
-                image_file, cv2.IMREAD_COLOR | cv2.IMREAD_IGNORE_ORIENTATION
-            )
-        else:
-            data_numpy = cv2.imread(
-                image_file, cv2.IMREAD_COLOR | cv2.IMREAD_IGNORE_ORIENTATION
-            )
+                if self.data_format == 'zip':
+                    from utils import zipreader
+                    data_numpy = zipreader.imread(
+                        image_file, cv2.IMREAD_COLOR | cv2.IMREAD_IGNORE_ORIENTATION
+                    )
+                else:
+                    data_numpy = cv2.imread(
+                        image_file, cv2.IMREAD_COLOR | cv2.IMREAD_IGNORE_ORIENTATION
+                    )
 
-        if self.color_rgb:
-            data_numpy = cv2.cvtColor(data_numpy, cv2.COLOR_BGR2RGB)
+                # if self.color_rgb:
+                #     data_numpy = cv2.cvtColor(data_numpy, cv2.COLOR_BGR2RGB)
 
-        if data_numpy is None:
-            logger.error('=> fail to read {}'.format(image_file))
-            raise ValueError('Fail to read {}'.format(image_file))
+                if data_numpy is None:
+                    logger.error('=> fail to read {}'.format(image_file))
+                    raise ValueError('Fail to read {}'.format(image_file))
 
-        joints = db_rec['joints_3d']
-        joints_vis = db_rec['joints_3d_vis']
+                joints = db_rec['joints_3d']
+                joints_vis = db_rec['joints_3d_vis']
 
-        c = db_rec['center']
-        s = db_rec['scale']
-        score = db_rec['score'] if 'score' in db_rec else 1
-        r = 0
+                c = db_rec['center']
+                s = db_rec['scale']
+                score = db_rec['score'] if 'score' in db_rec else 1
+                r = 0
 
-        if self.is_train:
-            if (np.sum(joints_vis[:, 0]) > self.num_joints_half_body
-                and np.random.rand() < self.prob_half_body):
-                c_half_body, s_half_body = self.half_body_transform(
-                    joints, joints_vis
-                )
+                if self.is_train:
+                    if (np.sum(joints_vis[:, 0]) > self.num_joints_half_body
+                        and np.random.rand() < self.prob_half_body):
+                        c_half_body, s_half_body = self.half_body_transform(
+                            joints, joints_vis
+                        )
 
-                if c_half_body is not None and s_half_body is not None:
-                    c, s = c_half_body, s_half_body
+                        if c_half_body is not None and s_half_body is not None:
+                            c, s = c_half_body, s_half_body
 
-            sf = self.scale_factor
-            rf = self.rotation_factor
-            s = s * np.clip(np.random.randn()*sf + 1, 1 - sf, 1 + sf)
-            r = np.clip(np.random.randn()*rf, -rf*2, rf*2) \
-                if random.random() <= 0.6 else 0
+                    sf = self.scale_factor
+                    rf = self.rotation_factor
+                    s = s * np.clip(np.random.randn()*sf + 1, 1 - sf, 1 + sf)
+                    r = np.clip(np.random.randn()*rf, -rf*2, rf*2) \
+                        if random.random() <= 0.6 else 0
 
-            if self.flip and random.random() <= 0.5:
-                data_numpy = data_numpy[:, ::-1, :]
-                joints, joints_vis = fliplr_joints(
-                    joints, joints_vis, data_numpy.shape[1], self.flip_pairs)
-                c[0] = data_numpy.shape[1] - c[0] - 1
+                    if self.flip and random.random() <= 0.5:
+                        data_numpy = data_numpy[:, ::-1, :]
+                        joints, joints_vis = fliplr_joints(
+                            joints, joints_vis, data_numpy.shape[1], self.flip_pairs)
+                        c[0] = data_numpy.shape[1] - c[0] - 1
 
-        trans = get_affine_transform(c, s, r, self.image_size)
-        input = cv2.warpAffine(
-            data_numpy,
-            trans,
-            (int(self.image_size[0]), int(self.image_size[1])),
-            flags=cv2.INTER_LINEAR)
+                trans = get_affine_transform(c, s, r, self.image_size)
+                input = cv2.warpAffine(
+                    data_numpy,
+                    trans,
+                    (int(self.image_size[0]), int(self.image_size[1])),
+                    flags=cv2.INTER_LINEAR)
 
-        if self.transform:
-            input = self.transform(input)
+                if self.transform:
+                    input = self.transform(input)
 
-        for i in range(self.num_joints):
-            if joints_vis[i, 0] > 0.0:
-                joints[i, 0:2] = affine_transform(joints[i, 0:2], trans)
+                for i in range(self.num_joints):
+                    if joints_vis[i, 0] > 0.0:
+                        joints[i, 0:2] = affine_transform(joints[i, 0:2], trans)
 
-        target, target_weight = self.generate_target(joints, joints_vis)
+                target, target_weight = self.generate_target(joints, joints_vis)
 
-        target = torch.from_numpy(target)
-        target_weight = torch.from_numpy(target_weight)
+                target = torch.from_numpy(target)
+                target_weight = torch.from_numpy(target_weight)
 
-        meta = {
-            'image': image_file,
-            'filename': filename,
-            'imgnum': imgnum,
-            'joints': joints,
-            'joints_vis': joints_vis,
-            'center': c,
-            'scale': s,
-            'rotation': r,
-            'score': score
-        }
+            else:
+                path = self.pickle_list[idx]
+                with open(path, 'rb') as f:
+                    data_numpy, ann = pickle.load(f)
+                name = self.prepared_dataset + '/'
+                image_file = path.replace(name, '')
 
-        return input, target, target_weight, meta
+                joints = self.transform_list(ann['keypoints'])
+                joints_vis = np.array(self.binarize_list(joints))
+
+                joints = np.array(joints)
+
+                half_height = data_numpy.shape[0] // 2
+                half_width = data_numpy.shape[1] // 2
+                c = np.array([half_height, half_width])
+                s = np.array([1, 1])
+                # s = np.array(
+                #     [(self.image_size[0]/data_numpy.shape[0]),
+                #     (self.image_size[1]/data_numpy.shape[1])]
+                # )
+                score = 1
+                r = 0
+
+                trans = get_affine_transform(c, s, r, self.image_size)
+                input = cv2.warpAffine(
+                    data_numpy,
+                    trans,
+                    (int(self.image_size[0]), int(self.image_size[1])),
+                    flags=cv2.INTER_LINEAR)
+
+                if self.transform:
+                    input = self.transform(input)
+
+                for i in range(self.num_joints):
+                    if joints_vis[i, 0] > 0.0:
+                        joints[i, 0:2] = affine_transform(joints[i, 0:2], trans)
+
+                target, target_weight = self.generate_target(joints, joints_vis)
+
+                target = torch.from_numpy(target)
+                target_weight = torch.from_numpy(target_weight)
+
+            meta = {
+                'image': image_file,
+                'filename': '',
+                'imgnum': 0,
+                'joints': joints,
+                'joints_vis': joints_vis,
+                'center': c,
+                'scale': s,
+                'rotation': r,
+                'score': score
+            }
+
+            return input, target, target_weight, meta
+
+        except Exception as e:
+            db_rec = copy.deepcopy(self.db[idx])
+            image_file = db_rec['image']
+            logger.error(f"Error processing {image_file}: {e}")
+            return self.__getitem__((idx + 1) % len(self))
+
 
     def select_data(self, db):
         db_selected = []

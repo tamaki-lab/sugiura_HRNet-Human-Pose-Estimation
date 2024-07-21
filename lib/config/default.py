@@ -127,6 +127,7 @@ def update_config(cfg, args):
     cfg.defrost()
     cfg.merge_from_file(args.cfg)
     cfg.merge_from_list(args.opts)
+    cfg.DATASET.SELECT_DATA = args.data_select
 
     if args.modelDir:
         cfg.OUTPUT_DIR = args.modelDir

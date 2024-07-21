@@ -61,6 +61,10 @@ def parse_args():
                         help='prev Model directory',
                         type=str,
                         default='')
+    parser.add_argument('--data_select',
+                        type=str,
+                        default='default',
+                        choices=['default', 'mydataset'])
 
     args = parser.parse_args()
     return args
