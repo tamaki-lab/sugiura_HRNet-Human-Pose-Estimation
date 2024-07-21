@@ -20,7 +20,7 @@ import torch.optim
 import torch.utils.data
 import torch.utils.data.distributed
 import torchvision.transforms as transforms
-from tensorboardX import SummaryWriter
+from torch.utils.tensorboard import SummaryWriter
 
 import _init_paths
 from config import cfg
@@ -67,6 +67,9 @@ def parse_args():
                         help='prev Model directory',
                         type=str,
                         default='')
+    parser.add_argument('--data_select',
+                        type=str,
+                        default=None)
 
     args = parser.parse_args()
 
@@ -108,9 +111,11 @@ def main():
     dump_input = torch.rand(
         (1, 3, cfg.MODEL.IMAGE_SIZE[1], cfg.MODEL.IMAGE_SIZE[0])
     )
-    writer_dict['writer'].add_graph(model, (dump_input, ))
+    # グラフの代わりにモデルの概要を追加
+    writer_dict['writer'].add_text('Model Summary', str(get_model_summary(model, dump_input)))
 
     logger.info(get_model_summary(model, dump_input))
+
 
     model = torch.nn.DataParallel(model, device_ids=cfg.GPUS).cuda()
 
