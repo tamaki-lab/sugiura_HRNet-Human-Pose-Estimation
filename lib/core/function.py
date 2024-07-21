@@ -19,6 +19,7 @@ from core.evaluate import accuracy
 from core.inference import get_final_preds
 from utils.transforms import flip_back
 from utils.vis import save_debug_images
+import json
 
 
 logger = logging.getLogger(__name__)
@@ -96,6 +97,21 @@ def train(config, train_loader, model, criterion, optimizer, epoch,
 
 def validate(config, val_loader, val_dataset, model, criterion, output_dir,
              tb_log_dir, writer_dict=None):
+    def save_txt(data_dict, filename):
+        with open(filename, 'w') as file:
+            json.dump(data_dict, file, indent=4)
+
+    def acc_per_num_keypoints(num_keypoints, count_num_keypoints):
+        acc = []
+        for num, count in zip(num_keypoints, count_num_keypoints):
+            if count != 0:
+                acc.append(num / count)
+            else:
+                acc.append(0)
+
+        acc = {index: value for index, value in enumerate(acc)}
+        save_txt(acc, 'acc.txt')
+
     batch_time = AverageMeter()
     losses = AverageMeter()
     acc = AverageMeter()
@@ -113,6 +129,8 @@ def validate(config, val_loader, val_dataset, model, criterion, output_dir,
     filenames = []
     imgnums = []
     idx = 0
+    num_keypoints = [0] * 18
+    count_num_keypoints = [0] * 18
     with torch.no_grad():
         end = time.time()
         for i, (input, target, target_weight, meta) in enumerate(val_loader):
@@ -158,6 +176,10 @@ def validate(config, val_loader, val_dataset, model, criterion, output_dir,
             _, avg_acc, cnt, pred = accuracy(output.cpu().numpy(),
                                              target.cpu().numpy())
 
+            if config.TEST.BATCH_SIZE_PER_GPU == 1:
+                num_keypoints[meta['num_keypoints']] += avg_acc
+                count_num_keypoints[meta['num_keypoints']] += 1
+
             acc.update(avg_acc, cnt)
 
             # measure elapsed time
@@ -196,6 +218,8 @@ def validate(config, val_loader, val_dataset, model, criterion, output_dir,
                 )
                 save_debug_images(config, input, meta, target, pred*4, output,
                                   prefix)
+
+        acc_per_num_keypoints(num_keypoints, count_num_keypoints)
 
         name_values, perf_indicator = val_dataset.evaluate(
             config, all_preds, output_dir, all_boxes, image_path,

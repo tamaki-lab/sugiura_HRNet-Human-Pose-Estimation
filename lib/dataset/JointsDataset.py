@@ -209,6 +209,8 @@ class JointsDataset(Dataset):
                 target = torch.from_numpy(target)
                 target_weight = torch.from_numpy(target_weight)
 
+                num_keypoints = np.sum((joints[:, 0] != 0) & (joints[:, 1] != 0))
+
             else:
                 path = self.pickle_list[idx]
                 with open(path, 'rb') as f:
@@ -251,6 +253,8 @@ class JointsDataset(Dataset):
                 target = torch.from_numpy(target)
                 target_weight = torch.from_numpy(target_weight)
 
+                num_keypoints = ann['num_keypoints']
+
             meta = {
                 'image': image_file,
                 'filename': '',
@@ -260,7 +264,8 @@ class JointsDataset(Dataset):
                 'center': c,
                 'scale': s,
                 'rotation': r,
-                'score': score
+                'score': score,
+                'num_keypoints': num_keypoints
             }
 
             return input, target, target_weight, meta
